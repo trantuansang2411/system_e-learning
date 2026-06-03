@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package course;
+
+service CourseService {
+  rpc ValidateCoupon (ValidateCouponRequest) returns (ValidateCouponResponse);
+  rpc GetCourseBasicInfo (CourseBasicInfoRequest) returns (CourseBasicInfoResponse);
+  rpc ListSubmittedCourses (ListSubmittedCoursesRequest) returns (ListSubmittedCoursesResponse);
+  rpc GetCourseReviewDetail (CourseReviewDetailRequest) returns (CourseReviewDetailResponse);
+  rpc MarkCourseNeedsFixes (MarkCourseNeedsFixesRequest) returns (MarkCourseNeedsFixesResponse);
+  rpc PublishCourse (PublishCourseRequest) returns (PublishCourseResponse);
+}
+
+message ValidateCouponRequest {
+  string course_id = 1;
+  string code = 2;
+}
+
+message ValidateCouponResponse {
+  bool valid = 1;
+  string discount_type = 2;
+  double discount_value = 3;
+  string message = 4;
+}
+
+message CourseBasicInfoRequest {
+  string course_id = 1;
+}
+
+message CourseBasicInfoResponse {
+  string course_id = 1;
+  string title = 2;
+  string instructor_id = 3;
+  int32 total_lessons = 4;
+  string status = 5;
+  double base_price = 6;
+  double sale_price = 7;
+  string thumbnail_url = 8;
+}
+
+message ListSubmittedCoursesRequest {
+  string status = 1;
+  int32 page = 2;
+  int32 limit = 3;
+}
+
+message SubmittedCourseItem {
+  string course_id = 1;
+  string title = 2;
+  string instructor_id = 3;
+  string instructor_name = 4;
+  string thumbnail_url = 5;
+  double base_price = 6;
+  double sale_price = 7;
+  string currency = 8;
+  string status = 9;
+  int32 total_sections = 10;
+  int32 total_lessons = 11;
+  int32 total_duration_sec = 12;
+  string submitted_at = 13;
+}
+
+message ListSubmittedCoursesResponse {
+  repeated SubmittedCourseItem items = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message CourseReviewDetailRequest {
+  string course_id = 1;
+}
+
+message CourseReviewInfo {
+  string course_id = 1;
+  string instructor_id = 2;
+  string instructor_name = 3;
+  string title = 4;
+  string slug = 5;
+  string description = 6;
+  repeated string objectives = 7;
+  repeated string requirements = 8;
+  repeated string outcomes = 9;
+  string topic_id = 10;
+  string thumbnail_url = 11;
+  double base_price = 12;
+  double sale_price = 13;
+  string currency = 14;
+  string status = 15;
+  int32 total_sections = 16;
+  int32 total_lessons = 17;
+  int32 total_duration_sec = 18;
+  double rating_avg = 19;
+  int32 rating_count = 20;
+  string submitted_at = 21;
+}
+
+message CourseReviewSection {
+  string id = 1;
+  string section_id = 2;
+  string course_id = 3;
+  string title = 4;
+  int32 order_index = 5;
+}
+
+message CourseReviewLesson {
+  string id = 1;
+  string lesson_id = 2;
+  string section_id = 3;
+  string title = 4;
+  int32 order_index = 5;
+  int32 duration_sec = 6;
+  bool is_preview = 7;
+  string video_url = 8;
+}
+
+message CourseReviewResource {
+  string id = 1;
+  string resource_id = 2;
+  string lesson_id = 3;
+  string title = 4;
+  string type = 5;
+  string url = 6;
+}
+
+message CourseReviewDetailResponse {
+  CourseReviewInfo course = 1;
+  repeated CourseReviewSection sections = 2;
+  repeated CourseReviewLesson lessons = 3;
+  repeated CourseReviewResource resources = 4;
+}
+
+message MarkCourseNeedsFixesRequest {
+  string course_id = 1;
+}
+
+message MarkCourseNeedsFixesResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message PublishCourseRequest {
+  string course_id = 1;
+}
+
+message PublishCourseResponse {
+  bool success = 1;
+  string message = 2;
+}

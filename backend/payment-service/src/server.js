@@ -1,0 +1,55 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const errorHandler = require('../shared/middleware/error.middleware');
+const paymentRoutes = require('./routes/payment.routes');
+const { startGrpcServer } = require('./grpc/server');
+const rabbitmq = require('../shared/events/rabbitmq');
+const kafkaProducer = require('../shared/events/kafka-producer');
+const logger = require('../shared/utils/logger');
+
+const app = express();
+app.use(helmet());
+app.use(cors());
+app.use((req, res, next) => {
+    // Stripe webhook signature verification requires raw body.
+    if (req.originalUrl === '/api/v1/payments/webhook/stripe') return next();
+    return express.json()(req, res, next);
+});
+app.use(morgan('dev', {
+    skip: (req) => req.path === '/health',
+}));
+
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'payment-service' }));
+app.use('/api/v1/payments', paymentRoutes);
+app.use(errorHandler);
+
+const PORT = process.env.PAYMENT_SERVICE_PORT || 3006;
+const GRPC_PORT = process.env.PAYMENT_GRPC_PORT || 50056;
+const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost:5672';
+
+async function start() {
+    try {
+        await rabbitmq.connect(RABBITMQ_URL);
+        await kafkaProducer.connect(process.env.KAFKA_BOOTSTRAP_SERVERS || 'localhost:9092');
+        startGrpcServer(GRPC_PORT);
+        app.listen(PORT, () => logger.info(`Payment Service running on port ${PORT}`));
+    } catch (err) {
+        logger.error('Payment Service failed to start:', err.message);
+        process.exit(1);
+    }
+}
+
+async function shutdown(signal) {
+    logger.info(`${signal} received. Shutting down Payment Service...`);
+    await rabbitmq.close();
+    await kafkaProducer.disconnect();
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+start();

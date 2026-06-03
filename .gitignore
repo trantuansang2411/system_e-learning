@@ -1,0 +1,7 @@
+.env
+node_modules/
+*.docx
+#ignore markdown files except for README.md
+!README.md
+*.md 
+*.docx

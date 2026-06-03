@@ -1,0 +1,201 @@
+const orderRepo = require('../repositories/order.repo');
+const grpcClients = require('../grpc/clients');
+const { publishEvent } = require('../../shared/events/rabbitmq');
+const kafkaProducer = require('../../shared/events/kafka-producer');
+const logger = require('../../shared/utils/logger');
+const { BadRequestError, NotFoundError, ConflictError } = require('../../shared/utils/errors');
+
+async function assertNotEnrolled(studentId, courseId) {
+    const enrollment = await grpcClients.hasEnrollment({ studentId, courseId });
+    if (enrollment?.enrolled) {
+        throw new ConflictError(`Course ${courseId} has already been enrolled`);
+    }
+}
+
+async function getAlreadyEnrolledCourseIds(studentId, courseIds) {
+    const checks = await Promise.all(
+        courseIds.map(async (courseId) => {
+            const enrollment = await grpcClients.hasEnrollment({ studentId, courseId });
+            return enrollment?.enrolled ? courseId : null;
+        }),
+    );
+    return checks.filter(Boolean);
+}
+
+// ========== CART ==========
+async function getCart(studentId) {
+    return orderRepo.getCart(studentId);
+}
+
+async function addToCart(studentId, courseId) {
+    if (!courseId) throw new BadRequestError('courseId is required');
+
+    await assertNotEnrolled(studentId, courseId);
+
+    // Get canonical pricing from course-service (basePrice/salePrice)
+    const courseInfo = await grpcClients.getCourseBasicInfo({ courseId });
+    if (!courseInfo || !courseInfo.courseId) throw new NotFoundError('Course not found');
+    if (courseInfo.status !== 'PUBLISHED') throw new BadRequestError(`Course ${courseId} is not available for purchase`);
+
+    const salePrice = Number(courseInfo.salePrice) || 0;
+    const basePrice = Number(courseInfo.basePrice) || 0;
+    const priceSnapshot = salePrice > 0 ? salePrice : basePrice;
+
+    const result = await orderRepo.addToCart(studentId, {
+        courseId,
+        titleSnapshot: courseInfo.title,
+        thumbnailUrl: courseInfo.thumbnailUrl || null,
+        priceSnapshot,
+        instructorId: courseInfo.instructorId || null,
+    });
+    kafkaProducer.publishAnalyticsEvent('add_to_cart', {
+        userId: studentId,
+        courseId,
+        courseTitle: courseInfo.title || '',
+    }).catch(() => {});
+    return result;
+}
+
+async function removeFromCart(studentId, courseId) {
+    return orderRepo.removeFromCart(studentId, courseId);
+}
+
+// ========== CHECKOUT ==========
+async function checkout(studentId, { couponCode, couponCourseId, paymentProvider }) {
+    const cart = await orderRepo.getCart(studentId);
+    if (!cart.items || cart.items.length === 0) throw new BadRequestError('Cart is empty');
+
+    const enrolledCourseIds = await getAlreadyEnrolledCourseIds(
+        studentId,
+        cart.items.map((item) => item.courseId),
+    );
+    if (enrolledCourseIds.length > 0) {
+        throw new ConflictError(`Already enrolled courses in cart: ${enrolledCourseIds.join(', ')}`);
+    }
+
+    // Lấy giá thật từ course-service cho từng item
+    const items = await Promise.all(cart.items.map(async (item) => {
+        const courseInfo = await grpcClients.getCourseBasicInfo({ courseId: item.courseId });
+        if (!courseInfo || !courseInfo.courseId) throw new NotFoundError(`Course ${item.courseId} not found`);
+        if (courseInfo.status !== 'PUBLISHED') throw new BadRequestError(`Course ${item.courseId} is not available for purchase`);
+
+        const salePrice = Number(courseInfo.salePrice) || 0;
+        const basePrice = Number(courseInfo.basePrice) || 0;
+        const originalPrice = salePrice > 0 ? salePrice : basePrice;
+        return {
+            courseId: item.courseId,
+            instructorId: item.instructorId || courseInfo.instructorId,
+            titleSnapshot: item.titleSnapshot || courseInfo.title,
+            originalPrice,
+            finalPrice: originalPrice,
+        };
+    }));
+
+    // Validate & áp dụng coupon cho course cụ thể
+    let discountAmount = 0;
+    if (couponCode && couponCourseId) {
+        const coupon = await grpcClients.validateCoupon({ courseId: couponCourseId, code: couponCode });
+        if (!coupon.valid) throw new BadRequestError(coupon.message || 'Invalid coupon');
+
+        const targetItem = items.find(i => i.courseId === couponCourseId);
+        if (targetItem) {
+            if (coupon.discountType === 'PERCENT') {
+                discountAmount = Math.round(targetItem.originalPrice * Number(coupon.discountValue) / 100);
+            } else {
+                discountAmount = Number(coupon.discountValue);
+            }
+            // Đảm bảo discount không vượt quá giá course
+            discountAmount = Math.min(discountAmount, targetItem.originalPrice);
+            targetItem.finalPrice = targetItem.originalPrice - discountAmount;
+        }
+    }
+
+    const total = items.reduce((sum, i) => sum + i.finalPrice, 0);
+
+    const order = await orderRepo.createOrder({
+        studentId, total, couponCode: couponCode || null, discountAmount: discountAmount || null,
+        items,
+    });
+
+    // Create payment intent via gRPC
+    //payment intent là một đối tượng đại diện cho ý định thanh toán của khách hàng, 
+    // chứa thông tin về số tiền cần thanh toán, loại tiền tệ, phương thức thanh toán được chọn và các chi tiết liên quan khác.
+    const paymentResult = await grpcClients.createPaymentIntent({
+        type: 'ORDER_PAY', studentId, orderId: order.id, amount: total, currency: 'VND', provider: paymentProvider,
+        idempotencyKey: `order_${order.id}`,
+    });
+
+    await orderRepo.updateOrderStatus(order.id, paymentResult.status === 'SUCCEEDED' ? 'PAID' : 'PENDING', {
+        paymentIntentId: paymentResult.paymentIntentId,
+        ...(paymentResult.status === 'SUCCEEDED' ? { paidAt: new Date() } : {}),
+    });
+    //thanh toán thành công, chúng ta sẽ cập nhật trạng thái của đơn hàng thành 'PAID', 
+    // xóa giỏ hàng của người dùng và xuất bản sự kiện 'order.paid' với thông tin chi tiết về đơn hàng và các khóa học đã mua. 
+    if (paymentResult.status === 'SUCCEEDED') {
+        await orderRepo.clearCart(studentId);
+        await publishEvent('order.paid', {
+            orderId: order.id, studentId, total,
+            items: items.map(i => ({ courseId: i.courseId, instructorId: i.instructorId, titleSnapshot: i.titleSnapshot, finalPrice: i.finalPrice })),
+        });
+        for (const item of items) {
+            kafkaProducer.publishAnalyticsEvent('course_revenue', {
+                userId: studentId,
+                courseId: item.courseId,
+                courseTitle: item.titleSnapshot || '',
+                metadata: { amount: Number(item.finalPrice) },
+            }).catch(() => {});
+        }
+        logger.info(`Order ${order.id} auto-paid (MOCK)`);
+    }
+
+    return {
+        order: { ...order, status: paymentResult.status === 'SUCCEEDED' ? 'PAID' : 'PENDING' },
+        paymentIntentId: paymentResult.paymentIntentId,
+        checkoutUrl: paymentResult.checkoutUrl || null,
+    };
+}
+
+// ========== ORDERS ==========
+async function getOrders(studentId, page, limit) {
+    return orderRepo.findOrdersByStudent(studentId, page, limit);
+}
+
+async function getOrderById(studentId, orderId) {
+    const order = await orderRepo.findOrderById(orderId);
+    if (!order || order.studentId !== studentId) throw new NotFoundError('Order not found');
+    return order;
+}
+
+// ========== EVENT HANDLERS ==========
+// Các hàm handlePaymentSucceeded và handlePaymentFailed được thiết kế để xử lý các sự kiện liên quan đến thanh toán,
+// như khi một đơn hàng được thanh toán thành công hoặc khi thanh toán thất bại.
+async function handlePaymentSucceeded(data) {
+    const { orderId, paymentIntentId, studentId, amount } = data;
+    const order = await orderRepo.findOrderById(orderId);
+    if (!order || order.status === 'PAID') return;
+
+    const updated = await orderRepo.updateOrderStatus(orderId, 'PAID', { paymentIntentId, paidAt: new Date() });
+    await orderRepo.clearCart(order.studentId);
+
+    await publishEvent('order.paid', {
+        orderId, studentId: order.studentId, total: Number(order.total),
+        items: updated.items.map(i => ({ courseId: i.courseId, instructorId: i.instructorId, titleSnapshot: i.titleSnapshot, finalPrice: Number(i.finalPrice) })),
+    });
+    for (const item of updated.items) {
+        kafkaProducer.publishAnalyticsEvent('course_revenue', {
+            userId: order.studentId,
+            courseId: item.courseId,
+            courseTitle: item.titleSnapshot || '',
+            metadata: { amount: Number(item.finalPrice) },
+        }).catch(() => {});
+    }
+    logger.info(`Order ${orderId} paid via payment webhook`);
+}
+
+async function handlePaymentFailed(data) {
+    const { orderId } = data;
+    await orderRepo.updateOrderStatus(orderId, 'CANCELLED');
+    logger.info(`Order ${orderId} cancelled due to payment failure`);
+}
+
+module.exports = { getCart, addToCart, removeFromCart, checkout, getOrders, getOrderById, handlePaymentSucceeded, handlePaymentFailed };
