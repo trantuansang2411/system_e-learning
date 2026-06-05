@@ -4,6 +4,497 @@ Dự án môn công nghệ mới xây dựng hệ thống học trực tuyến q
 
 ---
 
+## Mục Lục
+
+- [Phân Tích Nghiệp Vụ (Business Analysis)](#phân-tích-nghiệp-vụ)
+  - [Bối Cảnh Nghiệp Vụ](#1-bối-cảnh-nghiệp-vụ)
+  - [Các Bên Liên Quan](#2-các-bên-liên-quan-stakeholders)
+  - [Use Case Diagram](#3-use-case-diagram)
+  - [Yêu Cầu Chức Năng](#4-yêu-cầu-chức-năng-functional-requirements)
+  - [Yêu Cầu Phi Chức Năng](#5-yêu-cầu-phi-chức-năng-non-functional-requirements)
+  - [Quy Tắc Nghiệp Vụ](#6-quy-tắc-nghiệp-vụ-business-rules)
+  - [Domain Model](#7-domain-model)
+  - [Đặc Tả Luồng Nghiệp Vụ Chính](#8-đặc-tả-luồng-nghiệp-vụ-chính)
+- [Kiến Trúc Kỹ Thuật (Technical Architecture)](#kiến-trúc-kỹ-thuật)
+  - [Kiến Trúc Tổng Quan](#kiến-trúc-tổng-quan)
+  - [Stack Công Nghệ](#stack-công-nghệ)
+  - [Database Per Service](#database-per-service-architecture)
+  - [Các Microservice](#các-microservice)
+  - [Giao Tiếp Giữa Các Service](#giao-tiếp-giữa-các-service)
+  - [Luồng Mua Khoá Học](#luồng-mua-khoá-học-end-to-end)
+  - [Cơ Sở Hạ Tầng](#cơ-sở-hạ-tầng--triển-khai)
+- [Phân Quyền Người Dùng](#phân-quyền-người-dùng)
+- [Tính Năng Nổi Bật](#tính-năng-nổi-bật)
+- [Cấu Trúc Thư Mục](#cấu-trúc-thư-mục)
+- [Chạy Dự Án](#chạy-dự-án)
+
+---
+
+# Phân Tích Nghiệp Vụ
+
+## 1. Bối Cảnh Nghiệp Vụ
+
+### Vấn đề (Problem Statement)
+
+Thị trường học trực tuyến Việt Nam tăng trưởng trung bình 20%/năm, tuy nhiên các nền tảng hiện có chưa đáp ứng đồng thời:
+- Cơ chế kiểm duyệt nội dung đảm bảo chất lượng giảng dạy
+- Thanh toán nội địa (MoMo, ví điện tử) bên cạnh thanh toán quốc tế
+- Cơ chế chia sẻ doanh thu minh bạch cho giảng viên
+- Chứng chỉ số có thể xác minh sau khi hoàn tất khoá học
+
+### Giải Pháp
+
+Xây dựng **EduPlatform** — nền tảng B2C kết nối giảng viên và học viên, đảm bảo:
+
+| Mục tiêu | Giải pháp |
+|---|---|
+| Chất lượng nội dung | Workflow duyệt khoá học 3 bước (Draft → Pending → Published) |
+| Doanh thu giảng viên | Tự động chia 80% mỗi đơn hàng qua Wallet Service |
+| Thanh toán linh hoạt | Stripe (quốc tế) + MoMo (Việt Nam) |
+| Tin cậy học tập | Chứng chỉ số tự động cấp khi hoàn tất, có endpoint xác minh |
+| Hiệu năng cao | Kiến trúc microservices, scale độc lập từng service |
+
+---
+
+## 2. Các Bên Liên Quan (Stakeholders)
+
+### Ma Trận Stakeholder
+
+| Stakeholder | Loại | Mức Ảnh Hưởng | Nhu Cầu Chính | Mối Quan Tâm |
+|---|---|---|---|---|
+| **Học Viên** (Student) | Người dùng cuối | Cao | Tìm, mua, học khoá học chất lượng | Giá cả, chất lượng nội dung, tiến độ học |
+| **Giảng Viên** (Instructor) | Người dùng cuối | Cao | Tạo khoá học, theo dõi doanh thu | Tỉ lệ hoa hồng, công cụ tạo nội dung, số học viên |
+| **Quản Lý Học Thuật** (Admin) | Nội bộ | Cao | Kiểm duyệt nội dung, quản lý chất lượng | Công cụ review hiệu quả, báo cáo tổng quan |
+| **Khách Hàng Vãng Lai** (Guest) | Người dùng tiềm năng | Trung bình | Khám phá, tìm kiếm khoá học | Tốc độ tải trang, thông tin khoá học rõ ràng |
+| **Nền Tảng** (Business) | Chủ hệ thống | Cao | Tăng trưởng người dùng, doanh thu | Hoa hồng 20%, giữ chân người dùng, uy tín thương hiệu |
+
+### Bản Đồ Kỳ Vọng Stakeholder
+
+```
+                    Ảnh hưởng CAO
+                          │
+          Quản lý ────────┼──────── Giảng viên
+          học thuật        │         Học viên
+                          │
+    ──────────────────────┼────────────────────── Quan tâm
+    THẤP                  │                        CAO
+                          │
+                    Khách hàng
+                    vãng lai
+                          │
+                    Ảnh hưởng THẤP
+```
+
+---
+
+## 3. Use Case Diagram
+
+### Tổng Quan Actor và Use Case
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           SÀN BÁN KHOÁ HỌC ONLINE                              │
+│                                                                                 │
+│  ┌────────────┐     ┌──────────────────────────┐     ┌────────────────────────┐ │
+│  │  Giảng     │     │   USE CASES HỆ THỐNG     │     │   Khách hàng           │ │
+│  │  Viên      │────▶│                          │◀────│   Vãng Lai             │ │
+│  └────────────┘     │  ◉ Đăng Nhập (<<include>>│     └────────────────────────┘ │
+│        │            │  ─────────────────────── │                               │ │
+│        ├──────────▶ │  Giảng Viên:             │     ┌────────────────────────┐ │
+│        │            │  ◉ Quản lý hồ sơ GV      │     │   Học Viên             │ │
+│        │            │  ◉ Quản lý khoá học       │◀────│                        │ │
+│        │            │  ◉ Quản lý phần học       │     └────────────────────────┘ │
+│        │            │  ◉ Quản lý bài học        │            │                  │
+│        │            │  ◉ Quản lý tài liệu       │            ├─▶ Ứng tuyển GV   │
+│  ┌─────▼──────┐     │  ◉ Gửi duyệt khoá học    │            ├─▶ Xem thông báo  │
+│  │  (extends) │     │  ─────────────────────── │            ├─▶ Học khoá học   │
+│  │  Người     │     │  Khách Vãng Lai:          │            ├─▶ Đánh giá KH    │
+│  │  Dùng      │     │  ◉ Đăng ký tài khoản      │            ├─▶ Xem giỏ hàng  │
+│  │  (Base)    │     │  ◉ Xem thông tin khoá học │            ├─▶ Lịch sử GD     │
+│  └────────────┘     │  ◉ Tìm kiếm khoá học     │            ├─▶ Nạp tiền ví    │
+│                     │  ─────────────────────── │            └─▶ Quản lý hồ sơ  │
+│  ┌────────────┐     │  Admin:                  │                               │
+│  │  Quản Lý   │────▶│  ◉ Gửi duyệt khoá học    │                               │
+│  │  Học Thuật │     │  ◉ Xét duyệt giảng viên  │                               │
+│  └────────────┘     └──────────────────────────┘                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Chi Tiết Use Case Theo Actor
+
+#### Actor 1: Khách Hàng Vãng Lai (Guest)
+| ID | Use Case | Mô Tả | Điều Kiện Tiên Quyết |
+|---|---|---|---|
+| UC-G01 | Đăng ký tài khoản | Tạo tài khoản mới với email/mật khẩu hoặc Google | Chưa có tài khoản |
+| UC-G02 | Xem thông tin khoá học | Xem chi tiết khoá học, nội dung chương trình, giá | Khoá học đã xuất bản |
+| UC-G03 | Tìm kiếm khoá học | Tìm theo từ khoá, lọc theo giá/chủ đề/rating | Không yêu cầu |
+
+#### Actor 2: Học Viên (Student)
+| ID | Use Case | Mô Tả | Điều Kiện Tiên Quyết |
+|---|---|---|---|
+| UC-S01 | Đăng nhập | Xác thực bằng JWT/Google OAuth | Có tài khoản |
+| UC-S02 | Quản lý hồ sơ | Cập nhật thông tin cá nhân, ảnh đại diện | Đã đăng nhập |
+| UC-S03 | Xem giỏ hàng | Thêm/xoá khoá học, xem tổng giá | Đã đăng nhập |
+| UC-S04 | Thanh toán | Thanh toán qua Stripe hoặc MoMo | Có khoá học trong giỏ |
+| UC-S05 | Học khoá học đã mua | Xem bài học, đánh dấu hoàn thành theo tiến độ | Đã mua khoá học |
+| UC-S06 | Đánh giá khoá học | Viết đánh giá, xếp hạng 1–5 sao | Đã học ít nhất 1 bài |
+| UC-S07 | Xem lịch sử giao dịch | Xem các đơn hàng đã thanh toán | Đã đăng nhập |
+| UC-S08 | Nạp tiền vào ví | Nạp tiền vào ví điện tử trên nền tảng | Đã đăng nhập |
+| UC-S09 | Xem thông báo | Nhận thông báo đơn hàng, chứng chỉ | Đã đăng nhập |
+| UC-S10 | Ứng tuyển giảng viên | Gửi yêu cầu nâng cấp vai trò thành giảng viên | Đã đăng nhập |
+
+#### Actor 3: Giảng Viên (Instructor)
+| ID | Use Case | Mô Tả | Điều Kiện Tiên Quyết |
+|---|---|---|---|
+| UC-I01 | Đăng nhập | Xác thực, truy cập dashboard giảng viên | Được duyệt làm giảng viên |
+| UC-I02 | Quản lý hồ sơ giảng viên | Cập nhật tiểu sử, chuyên môn, thông tin ngân hàng | Đã đăng nhập |
+| UC-I03 | Quản lý khoá học | Tạo, sửa, xoá khoá học (CRUD) | Đã đăng nhập |
+| UC-I04 | Quản lý phần học | Tạo/sắp xếp các chương (Section) trong khoá học | Khoá học tồn tại |
+| UC-I05 | Quản lý bài học | Thêm bài học video/text vào từng chương | Section tồn tại |
+| UC-I06 | Quản lý tài liệu học tập | Upload, quản lý tài liệu đính kèm | Bài học tồn tại |
+| UC-I07 | Gửi duyệt khoá học | Chuyển trạng thái khoá học từ Draft → Pending | Khoá học đầy đủ nội dung |
+
+#### Actor 4: Quản Lý Học Thuật (Admin)
+| ID | Use Case | Mô Tả | Điều Kiện Tiên Quyết |
+|---|---|---|---|
+| UC-A01 | Đăng nhập | Xác thực tài khoản quản trị | Có tài khoản admin |
+| UC-A02 | Xét duyệt khoá học | Duyệt/từ chối khoá học Pending, gửi phản hồi | Có khoá học Pending |
+| UC-A03 | Xét duyệt giảng viên | Duyệt/từ chối yêu cầu trở thành giảng viên | Có yêu cầu chờ duyệt |
+| UC-A04 | Quản lý người dùng | Khoá/mở tài khoản, xem lịch sử vi phạm | Đã đăng nhập |
+| UC-A05 | Xem analytics nền tảng | Dashboard doanh thu, người dùng, khoá học | Đã đăng nhập |
+
+---
+
+## 4. Yêu Cầu Chức Năng (Functional Requirements)
+
+### Module Xác Thực & Người Dùng
+
+| ID | Yêu Cầu | Độ Ưu Tiên | Actor |
+|---|---|---|---|
+| FR-AU-01 | Hệ thống cho phép đăng ký bằng email/mật khẩu | Must Have | Guest |
+| FR-AU-02 | Hệ thống hỗ trợ đăng nhập qua Google OAuth 2.0 | Must Have | Guest |
+| FR-AU-03 | JWT Access Token hết hạn sau 15 phút; Refresh Token 7 ngày | Must Have | All |
+| FR-AU-04 | Gửi email xác minh khi đăng ký | Must Have | Guest |
+| FR-AU-05 | Học viên có thể cập nhật ảnh đại diện và thông tin cá nhân | Should Have | Student |
+| FR-AU-06 | Học viên gửi yêu cầu trở thành giảng viên (kèm hồ sơ năng lực) | Must Have | Student |
+
+### Module Khoá Học
+
+| ID | Yêu Cầu | Độ Ưu Tiên | Actor |
+|---|---|---|---|
+| FR-CS-01 | Giảng viên tạo khoá học với tiêu đề, mô tả, giá, ảnh bìa | Must Have | Instructor |
+| FR-CS-02 | Giảng viên thêm Section (chương) và Lesson (bài học) | Must Have | Instructor |
+| FR-CS-03 | Giảng viên upload tài liệu đính kèm cho bài học | Should Have | Instructor |
+| FR-CS-04 | Khoá học có 3 trạng thái: Draft / Pending / Published | Must Have | System |
+| FR-CS-05 | Giảng viên gửi khoá học để admin duyệt | Must Have | Instructor |
+| FR-CS-06 | Admin duyệt hoặc từ chối khoá học với lý do cụ thể | Must Have | Admin |
+| FR-CS-07 | Chỉ khoá học Published mới hiển thị với học viên | Must Have | System |
+| FR-CS-08 | Hệ thống hỗ trợ coupon/mã giảm giá cho khoá học | Should Have | Instructor |
+
+### Module Tìm Kiếm
+
+| ID | Yêu Cầu | Độ Ưu Tiên | Actor |
+|---|---|---|---|
+| FR-SE-01 | Tìm kiếm full-text theo tiêu đề, mô tả khoá học | Must Have | Guest, Student |
+| FR-SE-02 | Lọc theo khoảng giá (min/max) | Should Have | Guest, Student |
+| FR-SE-03 | Lọc theo chủ đề/danh mục | Should Have | Guest, Student |
+| FR-SE-04 | Lọc theo rating trung bình | Should Have | Guest, Student |
+| FR-SE-05 | Sắp xếp theo giá / rating / mới nhất | Should Have | Guest, Student |
+| FR-SE-06 | Index tự động cập nhật khi khoá học được xuất bản hoặc có đánh giá mới | Must Have | System |
+
+### Module Đơn Hàng & Thanh Toán
+
+| ID | Yêu Cầu | Độ Ưu Tiên | Actor |
+|---|---|---|---|
+| FR-OR-01 | Học viên thêm/xoá khoá học vào giỏ hàng | Must Have | Student |
+| FR-OR-02 | Học viên checkout và chọn phương thức thanh toán | Must Have | Student |
+| FR-OR-03 | Tích hợp Stripe để thanh toán thẻ quốc tế | Must Have | Student |
+| FR-OR-04 | Tích hợp MoMo để thanh toán ví điện tử Việt Nam | Must Have | Student |
+| FR-OR-05 | Xử lý webhook callback từ Stripe/MoMo để xác nhận thanh toán | Must Have | System |
+| FR-OR-06 | Sau thanh toán thành công, tự động mở quyền truy cập khoá học | Must Have | System |
+| FR-OR-07 | Học viên xem lịch sử đơn hàng | Should Have | Student |
+
+### Module Học Tập & Chứng Chỉ
+
+| ID | Yêu Cầu | Độ Ưu Tiên | Actor |
+|---|---|---|---|
+| FR-LR-01 | Hệ thống tạo enrollment khi đơn hàng được thanh toán | Must Have | System |
+| FR-LR-02 | Học viên đánh dấu hoàn thành từng bài học | Must Have | Student |
+| FR-LR-03 | Hệ thống tính % tiến độ hoàn thành khoá học | Should Have | System |
+| FR-LR-04 | Tự động cấp chứng chỉ số khi học viên hoàn thành 100% khoá học | Must Have | System |
+| FR-LR-05 | Cung cấp endpoint công khai để xác minh tính hợp lệ của chứng chỉ | Should Have | System |
+
+### Module Ví & Doanh Thu
+
+| ID | Yêu Cầu | Độ Ưu Tiên | Actor |
+|---|---|---|---|
+| FR-WL-01 | Mỗi người dùng có ví điện tử riêng trên nền tảng | Must Have | System |
+| FR-WL-02 | Sau mỗi đơn hàng: 80% doanh thu chuyển vào ví giảng viên | Must Have | System |
+| FR-WL-03 | Giảng viên xem lịch sử giao dịch ví | Should Have | Instructor |
+| FR-WL-04 | Học viên nạp tiền vào ví để thanh toán khoá học | Should Have | Student |
+
+### Module Đánh Giá & Thông Báo
+
+| ID | Yêu Cầu | Độ Ưu Tiên | Actor |
+|---|---|---|---|
+| FR-RV-01 | Học viên viết đánh giá và xếp hạng 1–5 sao sau khi học | Must Have | Student |
+| FR-RV-02 | Rating trung bình khoá học cập nhật realtime | Should Have | System |
+| FR-NF-01 | Gửi thông báo khi đơn hàng được xác nhận | Must Have | System |
+| FR-NF-02 | Gửi thông báo khi chứng chỉ được cấp | Should Have | System |
+| FR-NF-03 | Gửi thông báo khi khoá học được duyệt/từ chối | Should Have | System |
+
+---
+
+## 5. Yêu Cầu Phi Chức Năng (Non-Functional Requirements)
+
+### Hiệu Năng (Performance)
+
+| ID | Yêu Cầu | Mục Tiêu |
+|---|---|---|
+| NFR-PF-01 | Thời gian phản hồi API tìm kiếm | < 200ms ở percentile 95 |
+| NFR-PF-02 | Thời gian phản hồi API thanh toán | < 500ms (không tính thời gian redirect) |
+| NFR-PF-03 | Throughput tối thiểu | 500 requests/giây trên API Gateway |
+| NFR-PF-04 | Thời gian tải trang frontend | < 3 giây trên kết nối 4G |
+
+### Bảo Mật (Security)
+
+| ID | Yêu Cầu | Chi Tiết |
+|---|---|---|
+| NFR-SC-01 | Xác thực JWT trên mọi API bảo vệ | RS256 algorithm, kiểm tra tại API Gateway |
+| NFR-SC-02 | Mã hoá mật khẩu | bcrypt với salt rounds ≥ 12 |
+| NFR-SC-03 | Rate limiting | Max 100 req/phút/IP; 10 req/phút trên auth endpoints |
+| NFR-SC-04 | Không lưu dữ liệu thẻ thanh toán | Delegate 100% cho Stripe/MoMo PCI-DSS compliant |
+| NFR-SC-05 | HTTPS bắt buộc | TLS 1.2+ trên mọi kết nối |
+
+### Độ Tin Cậy & Khả Dụng (Reliability & Availability)
+
+| ID | Yêu Cầu | Mục Tiêu |
+|---|---|---|
+| NFR-RA-01 | Uptime hệ thống | ≥ 99.5% (cho phép ~22 giờ downtime/năm) |
+| NFR-RA-02 | Xử lý lỗi service | Circuit breaker pattern, fallback graceful |
+| NFR-RA-03 | Eventual consistency | Dữ liệu nhất quán trong vòng 5 giây sau event |
+| NFR-RA-04 | Không mất dữ liệu thanh toán | At-least-once delivery qua RabbitMQ, idempotency key |
+
+### Khả Năng Mở Rộng (Scalability)
+
+| ID | Yêu Cầu | Chi Tiết |
+|---|---|---|
+| NFR-SL-01 | Scale ngang độc lập | Mỗi service deploy và scale riêng biệt |
+| NFR-SL-02 | Stateless service | Không lưu session trên server (dùng JWT + Redis) |
+| NFR-SL-03 | Database isolation | Mỗi service có database riêng (xem Database Per Service) |
+
+---
+
+## 6. Quy Tắc Nghiệp Vụ (Business Rules)
+
+### Phân Chia Doanh Thu
+
+```
+┌─────────────────────────────────────────────────┐
+│            MÔ HÌNH DOANH THU                    │
+│                                                  │
+│   Học viên thanh toán: 100% giá khoá học         │
+│              ↓                                   │
+│   ┌──────────────────────────────────┐           │
+│   │   Ví Giảng Viên      80%        │           │
+│   │   Hoa hồng Nền tảng  20%        │           │
+│   └──────────────────────────────────┘           │
+│                                                  │
+│   Phân phối tức thì sau khi payment.succeeded   │
+└─────────────────────────────────────────────────┘
+```
+
+### Vòng Đời Khoá Học
+
+```
+  [Giảng viên tạo]
+        ↓
+    DRAFT ──────────────────────────────▶ Giảng viên có thể edit tự do
+        ↓ Giảng viên "Gửi Duyệt"
+    PENDING ─────────────────────────▶ Giảng viên không edit được
+        ↓ Admin duyệt          ↓ Admin từ chối
+    PUBLISHED               DRAFT (kèm lý do từ chối)
+        ↓
+  Hiển thị công khai, có thể mua
+```
+
+### Quy Tắc Học Tập & Chứng Chỉ
+
+| ID | Quy Tắc |
+|---|---|
+| BR-LR-01 | Học viên chỉ truy cập khoá học sau khi đơn hàng ở trạng thái PAID |
+| BR-LR-02 | Chứng chỉ được cấp khi và chỉ khi tất cả bài học đã được đánh dấu hoàn thành |
+| BR-LR-03 | Mỗi học viên chỉ có 1 enrollment cho 1 khoá học (không mua lại) |
+| BR-LR-04 | Học viên chỉ đánh giá được khoá học đã mua |
+
+### Quy Tắc Quản Lý Giảng Viên
+
+| ID | Quy Tắc |
+|---|---|
+| BR-IN-01 | Học viên phải gửi yêu cầu và được Admin duyệt mới trở thành Giảng Viên |
+| BR-IN-02 | Admin có thể thu hồi quyền giảng viên; khoá học của giảng viên bị khoá sẽ bị ẩn |
+| BR-IN-03 | Giảng viên nhận doanh thu từ khoá học Published, không nhận từ khoá học bị ẩn |
+
+---
+
+## 7. Domain Model
+
+### Sơ Đồ Thực Thể Nghiệp Vụ
+
+```
+┌──────────┐     đăng ký/login     ┌──────────┐
+│   AUTH   │ ─────────────────────▶│   USER   │
+│──────────│                       │──────────│
+│ authId   │      1                │ userId   │
+│ email    │ ─────────────────── 1 │ name     │
+│ password │                       │ email    │
+│ role     │                       │ phone    │
+└──────────┘                       └──────────┘
+                                       │  │
+                              tạo 1..* │  │ có 1
+                                       ▼  ▼
+┌──────────┐ thuộc về  ┌──────────┐  ┌──────────┐  ┌──────────────┐
+│  SEARCH  │◀──────────│  COURSE  │  │  ORDER   │  │    WALLET    │
+│──────────│           │──────────│  │──────────│  │──────────────│
+│documentId│           │ courseId │  │ orderId  │  │ walletId     │
+│ courseId │           │ title    │  │ userId   │  │ userId       │
+└──────────┘           │ price    │  │ totalAmt │  │ balance      │
+                       └──────────┘  │ status   │  └──────────────┘
+                            │        └──────────┘        │
+                    đăng ký │               │ liên kết    │ giao dịch
+                            ▼               ▼             ▼
+                       ┌──────────┐    ┌──────────┐  ┌──────────────┐
+                       │ LEARNING │    │ PAYMENT  │  │ NOTIFICATION │
+                       │──────────│    │──────────│  │──────────────│
+                       │learningId│    │paymentId │  │notificationId│
+                       │ userId   │    │ orderId  │  │ userId       │
+                       │ courseId │    │ amount   │  │ content      │
+                       │ status   │    │ status   │  └──────────────┘
+                       └──────────┘    └──────────┘
+                            │
+                    viết    │ đánh giá
+                            ▼
+                       ┌──────────┐
+                       │  REVIEW  │
+                       │──────────│
+                       │ reviewId │
+                       │ userId   │
+                       │ courseId │
+                       │ rating   │
+                       │ comment  │
+                       └──────────┘
+```
+
+### Mô Tả Các Thực Thể Chính
+
+| Thực Thể | Mô Tả | Thuộc Tính Quan Trọng |
+|---|---|---|
+| **AUTH** | Thông tin xác thực tài khoản | role (student/instructor/admin) |
+| **USER** | Hồ sơ người dùng | name, email, phone |
+| **COURSE** | Khoá học trên nền tảng | title, price, status (draft/pending/published) |
+| **LEARNING** | Mối quan hệ học viên – khoá học | status (enrolled/in-progress/completed) |
+| **ORDER** | Đơn hàng mua khoá học | totalAmount, status (pending/paid/cancelled) |
+| **PAYMENT** | Giao dịch thanh toán | amount, provider (stripe/momo), status |
+| **WALLET** | Ví điện tử người dùng | balance |
+| **REVIEW** | Đánh giá khoá học | rating (1–5), comment |
+| **NOTIFICATION** | Thông báo hệ thống | content, isRead |
+| **SEARCH** | Index tìm kiếm khoá học | Tổng hợp dữ liệu từ Course + Review |
+
+---
+
+## 8. Đặc Tả Luồng Nghiệp Vụ Chính
+
+### Luồng 1: Mua Khoá Học (Happy Path)
+
+```
+Học Viên          API Gateway      Order Svc      Payment Svc     RabbitMQ     Learning Svc
+    │                   │               │               │               │              │
+    │── Thêm giỏ hàng ─▶│               │               │               │              │
+    │                   │── POST /cart─▶│               │               │              │
+    │                   │               │── Lưu cart ──▶│               │              │
+    │                   │               │               │               │              │
+    │── Checkout ───────▶│               │               │               │              │
+    │                   │── POST /order▶│               │               │              │
+    │                   │               │── gRPC ───────▶│               │              │
+    │                   │               │               │── Tạo intent ─│              │
+    │                   │               │◀── URL ────────│               │              │
+    │◀── Redirect URL ──│               │               │               │              │
+    │                   │               │               │               │              │
+    │── [Thanh toán trên Stripe/MoMo] ──────────────────▶│               │              │
+    │                   │               │               │── Webhook ────│              │
+    │                   │               │               │    payment    │              │
+    │                   │               │               │   .succeeded  │              │
+    │                   │               │◀── Event ─────│               │              │
+    │                   │               │── Update PAID─▶               │              │
+    │                   │               │── Publish ────────────────────▶ order.paid   │
+    │                   │               │               │               │── Enroll ───▶│
+    │                   │               │               │               │   Notify ──▶ Notif Svc
+    │◀── Thông báo ─────│               │               │               │              │
+```
+
+### Luồng 2: Xuất Bản Khoá Học
+
+```
+Giảng Viên      Course Svc      Admin Svc       RabbitMQ       Search Svc
+    │               │               │               │               │
+    │── Tạo KH ────▶│               │               │               │
+    │               │── status=DRAFT│               │               │
+    │               │               │               │               │
+    │── Gửi duyệt──▶│               │               │               │
+    │               │── PENDING ────▶               │               │
+    │               │               │               │               │
+    │               │               │── Admin review│               │
+    │               │               │── Duyệt ─────▶│               │
+    │               │◀── PUBLISHED ─│   course      │               │
+    │               │               │  .published   │               │
+    │               │               │               │── Index ─────▶│
+    │               │               │               │   full-text   │
+    │◀── Thông báo ─│               │               │               │
+```
+
+### Luồng 3: Hoàn Tất Khoá Học & Cấp Chứng Chỉ
+
+```
+Học Viên      Learning Svc      RabbitMQ      Certificate Svc    Notification Svc
+    │               │               │               │                   │
+    │── Học bài ───▶│               │               │                   │
+    │               │── Đánh dấu ──▶│               │                   │
+    │               │   hoàn thành  │               │                   │
+    │               │               │               │                   │
+    │── Bài cuối ──▶│               │               │                   │
+    │               │── Tính 100% ──│               │                   │
+    │               │── Publish ────▶ course        │                   │
+    │               │               │  .completed   │                   │
+    │               │               │── Cấp chứng ─▶│                   │
+    │               │               │   chỉ số      │── Lưu cert ──────│
+    │               │               │               │── Publish ───────▶ cert.issued
+    │               │               │               │                   │── Thông báo
+    │◀── Nhận cert ─│               │               │                   │
+```
+
+### Luồng 4: Ứng Tuyển Giảng Viên
+
+```
+Học Viên      User Svc         Admin Svc       Auth Svc
+    │              │               │               │
+    │── Gửi hồ ──▶│               │               │
+    │   sơ GV      │── Pending ───▶│               │
+    │              │               │               │
+    │              │── Admin xem ─▶│               │
+    │              │   & duyệt     │               │
+    │              │               │               │
+    │              │◀── Approved ──│               │
+    │              │── Update role▶│               │
+    │              │   INSTRUCTOR  │               │
+    │              │               │── Update ────▶│
+    │              │               │   JWT role    │
+    │◀── Thông báo─│               │               │
+```
+
+---
+
+# Kiến Trúc Kỹ Thuật
+
 ## Kiến Trúc Tổng Quan
 
 ```
@@ -81,6 +572,91 @@ Dự án môn công nghệ mới xây dựng hệ thống học trực tuyến q
 | Icons | **Lucide React** | 0.487.0 |
 | Toast | **Sonner** | 2.0.3 |
 | Dark mode | **next-themes** | 0.4.6 |
+
+---
+
+## Database Per Service Architecture
+
+Mỗi microservice sở hữu và quản lý database riêng — không service nào truy cập trực tiếp vào database của service khác. Dữ liệu được chia sẻ qua gRPC hoặc message event.
+
+```
+┌───────────────────────────────────────────────────────────────────────────────────────────┐
+│                            DATABASE PER SERVICE ARCHITECTURE                              │
+├───────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                           │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐                      │
+│  │  Auth Service    │   │  User Service    │   │  Course Service  │                      │
+│  │     :3001        │   │     :3002        │   │     :3003        │                      │
+│  │                  │   │                  │   │                  │                      │
+│  │  ┌────────────┐  │   │  ┌────────────┐  │   │  ┌────────────┐  │                      │
+│  │  │ PostgreSQL │  │   │  │  MongoDB   │  │   │  │  MongoDB   │  │                      │
+│  │  │  auth_db   │  │   │  │  users_db  │  │   │  │ courses_db │  │                      │
+│  │  │            │  │   │  │            │  │   │  │            │  │                      │
+│  │  │ AUTH       │  │   │  │ User       │  │   │  │ Course     │  │                      │
+│  │  │            │  │   │  │ Profile    │  │   │  │ Section    │  │                      │
+│  │  └────────────┘  │   │  └────────────┘  │   │  │ Lesson     │  │                      │
+│  └──────────────────┘   └──────────────────┘   │  │ Document   │  │                      │
+│                                                 │  └────────────┘  │                      │
+│  ┌──────────────────┐   ┌──────────────────┐   └──────────────────┘                      │
+│  │  Search Service  │   │  Order Service   │                                             │
+│  │     :3004        │   │     :3005        │   ┌──────────────────┐                      │
+│  │                  │   │                  │   │  Payment Service │                      │
+│  │  ┌────────────┐  │   │  ┌────────────┐  │   │     :3006        │                      │
+│  │  │ PostgreSQL │  │   │  │ PostgreSQL │  │   │                  │                      │
+│  │  │ search_db  │  │   │  │ orders_db  │  │   │  ┌────────────┐  │                      │
+│  │  │            │  │   │  │            │  │   │  │ PostgreSQL │  │                      │
+│  │  │ Document   │  │   │  │ Order      │  │   │  │payments_db │  │                      │
+│  │  │ (Index)    │  │   │  │ CartItem   │  │   │  │            │  │                      │
+│  │  └────────────┘  │   │  └────────────┘  │   │  │ Payment    │  │                      │
+│  └──────────────────┘   └──────────────────┘   │  │ Transaction│  │                      │
+│                                                 │  └────────────┘  │                      │
+│  ┌──────────────────┐   ┌──────────────────┐   └──────────────────┘                      │
+│  │  Wallet Service  │   │ Learning Service │                                             │
+│  │     :3007        │   │     :3008        │   ┌──────────────────┐                      │
+│  │                  │   │                  │   │ Cert Service     │                      │
+│  │  ┌────────────┐  │   │  ┌────────────┐  │   │     :3009        │                      │
+│  │  │ PostgreSQL │  │   │  │  MongoDB   │  │   │                  │                      │
+│  │  │ wallets_db │  │   │  │learning_db │  │   │  ┌────────────┐  │                      │
+│  │  │            │  │   │  │            │  │   │  │  MongoDB   │  │                      │
+│  │  │ Wallet     │  │   │  │ Enrollment │  │   │  │  certs_db  │  │                      │
+│  │  │ WalletTx   │  │   │  │ Progress   │  │   │  │            │  │                      │
+│  │  └────────────┘  │   │  └────────────┘  │   │  │ Certificate│  │                      │
+│  └──────────────────┘   └──────────────────┘   │  │ Template   │  │                      │
+│                                                 │  └────────────┘  │                      │
+│  ┌──────────────────┐   ┌──────────────────┐   └──────────────────┘                      │
+│  │ Review Service   │   │ Notif Service    │                                             │
+│  │     :3010        │   │     :3011        │   ┌──────────────────┐                      │
+│  │                  │   │                  │   │  Admin Service   │                      │
+│  │  ┌────────────┐  │   │  ┌────────────┐  │   │     :3012        │                      │
+│  │  │  MongoDB   │  │   │  │  MongoDB   │  │   │                  │                      │
+│  │  │ reviews_db │  │   │  │  notif_db  │  │   │  (No own DB)     │                      │
+│  │  │            │  │   │  │            │  │   │  Gọi service     │                      │
+│  │  │ Review     │  │   │  │ Notif      │  │   │  khác qua gRPC   │                      │
+│  │  │ Rating     │  │   │  │            │  │   │                  │                      │
+│  │  └────────────┘  │   │  └────────────┘  │   └──────────────────┘                      │
+│  └──────────────────┘   └──────────────────┘                                             │
+│                                                                                           │
+├───────────────────────────────────────────────────────────────────────────────────────────┤
+│                            SHARED INFRASTRUCTURE (Không Service Riêng)                   │
+│                                                                                           │
+│   ┌──────────────┐    ┌──────────────────┐    ┌─────────────────┐    ┌─────────────────┐ │
+│   │   Redis 7    │    │  RabbitMQ 3.12   │    │   Kafka 3.7     │    │  Analytic Svc   │ │
+│   │              │    │                  │    │                 │    │     :8000       │ │
+│   │ • JWT Cache  │    │ • order.paid     │    │ • user.behavior │    │                 │ │
+│   │ • Rate limit │    │ • course.pub     │    │ • course.view   │    │  ┌───────────┐  │ │
+│   │ • Sessions   │    │ • cert.issued    │    │ • search.query  │    │  │ PostgreSQL│  │ │
+│   │              │    │ • review.created │    │                 │    │  │analytics_db│  │ │
+│   └──────────────┘    └──────────────────┘    └─────────────────┘    │  └───────────┘  │ │
+│                                                                        └─────────────────┘ │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Lý Do Chọn PostgreSQL vs MongoDB Cho Từng Service
+
+| Service | Database | Lý Do |
+|---|---|---|
+| Auth, Order, Payment, Wallet, Search | PostgreSQL | Dữ liệu quan hệ chặt, cần ACID transaction (giao dịch tài chính) |
+| User, Course, Learning, Cert, Review, Notif | MongoDB | Schema linh hoạt, dữ liệu lồng nhau (bài học trong section trong khoá học) |
 
 ---
 
