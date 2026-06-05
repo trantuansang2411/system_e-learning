@@ -29,6 +29,8 @@ Dự án môn công nghệ mới xây dựng hệ thống học trực tuyến q
 - [Chạy Dự Án](#chạy-dự-án)
 
 ---
+# Link báo cáo dự án
+[Xem ở đây](https://docs.google.com/document/d/1QM7R1VIYggNwNYhfeJ8nmMD91Fvc0aIBgudX9yNnw1g/edit?tab=t.0)
 
 # Phân Tích Nghiệp Vụ
 
