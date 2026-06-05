@@ -1,7 +1,8 @@
 .env
 node_modules/
 *.docx
-#ignore markdown files except for README.md
+.claude
+# Ignore markdown files but allow README.md
+*.md
 !README.md
-*.md 
-*.docx
+/dist
