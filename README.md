@@ -90,35 +90,7 @@ Xây dựng **EduPlatform** — nền tảng B2C kết nối giảng viên và h
 ## 3. Use Case Diagram
 
 ### Tổng Quan Actor và Use Case
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           SÀN BÁN KHOÁ HỌC ONLINE                              │
-│                                                                                 │
-│  ┌────────────┐     ┌──────────────────────────┐     ┌────────────────────────┐ │
-│  │  Giảng     │     │   USE CASES HỆ THỐNG     │     │   Khách hàng           │ │
-│  │  Viên      │────▶│                          │◀────│   Vãng Lai             │ │
-│  └────────────┘     │  ◉ Đăng Nhập (<<include>>│     └────────────────────────┘ │
-│        │            │  ─────────────────────── │                               │ │
-│        ├──────────▶ │  Giảng Viên:             │     ┌────────────────────────┐ │
-│        │            │  ◉ Quản lý hồ sơ GV      │     │   Học Viên             │ │
-│        │            │  ◉ Quản lý khoá học       │◀────│                        │ │
-│        │            │  ◉ Quản lý phần học       │     └────────────────────────┘ │
-│        │            │  ◉ Quản lý bài học        │            │                  │
-│        │            │  ◉ Quản lý tài liệu       │            ├─▶ Ứng tuyển GV   │
-│  ┌─────▼──────┐     │  ◉ Gửi duyệt khoá học    │            ├─▶ Xem thông báo  │
-│  │  (extends) │     │  ─────────────────────── │            ├─▶ Học khoá học   │
-│  │  Người     │     │  Khách Vãng Lai:          │            ├─▶ Đánh giá KH    │
-│  │  Dùng      │     │  ◉ Đăng ký tài khoản      │            ├─▶ Xem giỏ hàng  │
-│  │  (Base)    │     │  ◉ Xem thông tin khoá học │            ├─▶ Lịch sử GD     │
-│  └────────────┘     │  ◉ Tìm kiếm khoá học     │            ├─▶ Nạp tiền ví    │
-│                     │  ─────────────────────── │            └─▶ Quản lý hồ sơ  │
-│  ┌────────────┐     │  Admin:                  │                               │
-│  │  Quản Lý   │────▶│  ◉ Gửi duyệt khoá học    │                               │
-│  │  Học Thuật │     │  ◉ Xét duyệt giảng viên  │                               │
-│  └────────────┘     └──────────────────────────┘                               │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![alt text](assests/image.png)
 
 ### Chi Tiết Use Case Theo Actor
 
@@ -340,50 +312,7 @@ Xây dựng **EduPlatform** — nền tảng B2C kết nối giảng viên và h
 ## 7. Domain Model
 
 ### Sơ Đồ Thực Thể Nghiệp Vụ
-
-```
-┌──────────┐     đăng ký/login     ┌──────────┐
-│   AUTH   │ ─────────────────────▶│   USER   │
-│──────────│                       │──────────│
-│ authId   │      1                │ userId   │
-│ email    │ ─────────────────── 1 │ name     │
-│ password │                       │ email    │
-│ role     │                       │ phone    │
-└──────────┘                       └──────────┘
-                                       │  │
-                              tạo 1..* │  │ có 1
-                                       ▼  ▼
-┌──────────┐ thuộc về  ┌──────────┐  ┌──────────┐  ┌──────────────┐
-│  SEARCH  │◀──────────│  COURSE  │  │  ORDER   │  │    WALLET    │
-│──────────│           │──────────│  │──────────│  │──────────────│
-│documentId│           │ courseId │  │ orderId  │  │ walletId     │
-│ courseId │           │ title    │  │ userId   │  │ userId       │
-└──────────┘           │ price    │  │ totalAmt │  │ balance      │
-                       └──────────┘  │ status   │  └──────────────┘
-                            │        └──────────┘        │
-                    đăng ký │               │ liên kết    │ giao dịch
-                            ▼               ▼             ▼
-                       ┌──────────┐    ┌──────────┐  ┌──────────────┐
-                       │ LEARNING │    │ PAYMENT  │  │ NOTIFICATION │
-                       │──────────│    │──────────│  │──────────────│
-                       │learningId│    │paymentId │  │notificationId│
-                       │ userId   │    │ orderId  │  │ userId       │
-                       │ courseId │    │ amount   │  │ content      │
-                       │ status   │    │ status   │  └──────────────┘
-                       └──────────┘    └──────────┘
-                            │
-                    viết    │ đánh giá
-                            ▼
-                       ┌──────────┐
-                       │  REVIEW  │
-                       │──────────│
-                       │ reviewId │
-                       │ userId   │
-                       │ courseId │
-                       │ rating   │
-                       │ comment  │
-                       └──────────┘
-```
+![alt text](assests/image1.png)
 
 ### Mô Tả Các Thực Thể Chính
 
